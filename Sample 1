@@ -1,12 +1,9 @@
 """
 A minimal educational blockchain in Python.
-
 This is a STARTING POINT, not production code — no networking between
 computers yet, no real wallets, no security hardening. It exists to make
 the core ideas (blocks, hashing, proof-of-work, chain validation) concrete
-and runnable, so you have something real to build on.
-
-Run it directly: python3 simple_blockchain.py
+and runnable, so I have something real to build on.
 """
 
 import hashlib
