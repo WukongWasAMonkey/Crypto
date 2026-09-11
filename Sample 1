@@ -1,0 +1,157 @@
+"""
+A minimal educational blockchain in Python.
+
+This is a STARTING POINT, not production code — no networking between
+computers yet, no real wallets, no security hardening. It exists to make
+the core ideas (blocks, hashing, proof-of-work, chain validation) concrete
+and runnable, so you have something real to build on.
+
+Run it directly: python3 simple_blockchain.py
+"""
+
+import hashlib
+import json
+import time
+
+
+class Block:
+    def __init__(self, index, transactions, previous_hash, timestamp=None, nonce=0):
+        self.index = index                  # position of this block in the chain (0, 1, 2, ...)
+        self.transactions = transactions    # list of transaction dicts held in this block
+        self.previous_hash = previous_hash  # the fingerprint of the block right before this one
+        self.timestamp = timestamp or time.time()
+        self.nonce = nonce                  # the number miners change to "solve" the block
+        self.hash = self.compute_hash()
+
+    def compute_hash(self):
+        """
+        Turns everything about this block into one fixed-length fingerprint
+        (a "hash"). Change ANY field — even one character in one transaction —
+        and this fingerprint comes out completely different. That's what makes
+        tampering detectable.
+        """
+        block_string = json.dumps({
+            "index": self.index,
+            "transactions": self.transactions,
+            "previous_hash": self.previous_hash,
+            "timestamp": self.timestamp,
+            "nonce": self.nonce,
+        }, sort_keys=True)
+        return hashlib.sha256(block_string.encode()).hexdigest()
+
+
+class Blockchain:
+    # Number of leading zeros a valid block's hash must have.
+    # Higher = harder puzzle = slower to mine = more expensive to rewrite history.
+    # 4 is small on purpose so this runs fast on your laptop; real coins use
+    # difficulty that adjusts automatically to keep block times steady.
+    DIFFICULTY = 4
+
+    def __init__(self):
+        self.chain = []
+        self.pending_transactions = []
+        self._create_genesis_block()
+
+    def _create_genesis_block(self):
+        """The very first block in the chain. It has no real predecessor,
+        so we just use '0' as a placeholder previous_hash."""
+        genesis = Block(index=0, transactions=[], previous_hash="0")
+        genesis.hash = self._mine_block(genesis)
+        self.chain.append(genesis)
+
+    @property
+    def last_block(self):
+        return self.chain[-1]
+
+    def add_transaction(self, sender, recipient, amount):
+        """Queues a transaction to be bundled into the next mined block.
+        In a real coin, this is also where you'd check the sender actually
+        has enough balance and a valid signature — skipped here for clarity."""
+        self.pending_transactions.append({
+            "sender": sender,
+            "recipient": recipient,
+            "amount": amount,
+        })
+
+    def _mine_block(self, block):
+        """
+        Proof-of-work: keep changing 'nonce' and recomputing the hash until
+        the hash happens to start with DIFFICULTY zeros. There's no shortcut —
+        you just have to try nonces until you get lucky. That deliberate slowness
+        is the whole security model: rewriting old blocks means redoing this
+        work for every block after it, which gets expensive fast.
+        """
+        block.nonce = 0
+        computed_hash = block.compute_hash()
+        target = "0" * self.DIFFICULTY
+        while not computed_hash.startswith(target):
+            block.nonce += 1
+            computed_hash = block.compute_hash()
+        return computed_hash
+
+    def mine_pending_transactions(self, miner_reward_address):
+        """
+        Bundles up whatever transactions are waiting, mines a new block
+        containing them, and pays the miner a small reward in newly created
+        coin. This reward is literally how new coins come into existence —
+        there's no "printing" step separate from mining.
+        """
+        self.add_transaction(sender="NETWORK", recipient=miner_reward_address, amount=1)
+
+        new_block = Block(
+            index=self.last_block.index + 1,
+            transactions=self.pending_transactions,
+            previous_hash=self.last_block.hash,
+        )
+        new_block.hash = self._mine_block(new_block)
+
+        self.chain.append(new_block)
+        self.pending_transactions = []
+        return new_block
+
+    def is_chain_valid(self):
+        """
+        Walks the whole chain checking, for every block:
+          1. Does its stored hash actually match its contents? (proves no one
+             edited this block's data after it was mined)
+          2. Does its previous_hash actually match the block before it? (proves
+             no one swapped in a fake earlier block)
+        If either check fails anywhere, the chain has been tampered with.
+        """
+        for i in range(1, len(self.chain)):
+            current = self.chain[i]
+            previous = self.chain[i - 1]
+
+            if current.hash != current.compute_hash():
+                return False, f"Block {current.index} has been tampered with."
+
+            if current.previous_hash != previous.hash:
+                return False, f"Block {current.index} is not properly linked to block {previous.index}."
+
+        return True, "Chain is valid."
+
+
+if __name__ == "__main__":
+    my_coin = Blockchain()
+    print(f"Genesis block mined: {my_coin.last_block.hash}")
+
+    my_coin.add_transaction(sender="Alice", recipient="Bob", amount=10)
+    my_coin.add_transaction(sender="Bob", recipient="Charlie", amount=4)
+
+    print("Mining block 1...")
+    block1 = my_coin.mine_pending_transactions(miner_reward_address="Alice")
+    print(f"Block 1 mined: {block1.hash}")
+
+    my_coin.add_transaction(sender="Charlie", recipient="Alice", amount=1)
+    print("Mining block 2...")
+    block2 = my_coin.mine_pending_transactions(miner_reward_address="Bob")
+    print(f"Block 2 mined: {block2.hash}")
+
+    valid, message = my_coin.is_chain_valid()
+    print(f"\nChain valid? {valid} -- {message}")
+
+    # Prove the tamper-detection actually works:
+    print("\n--- Tampering with block 1's data ---")
+    my_coin.chain[1].transactions[0]["amount"] = 1000
+    valid, message = my_coin.is_chain_valid()
+    print(f"Chain valid? {valid} -- {message}")
